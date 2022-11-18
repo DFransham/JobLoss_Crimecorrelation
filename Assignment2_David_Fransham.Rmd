@@ -1,0 +1,324 @@
+---
+title: "Assignment2_David_Fransham"
+author: "David Fransham"
+date: "2022-11-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+INTRODUCTION - MOTIVATION/BACKGROUND
+____________________________________
+
+I previously conducted some analysis of whether there was a correlation between unemployment and recorded crime rates in New Zealand.  The result of that analysis was inconclusive, but in the process I realised that my stated hypothesis and data sets were not quite aligned to what I was actually intending to uncover in the data.
+
+This analysis is now on a refined assumption and hypothesis and refined data on both unemployment and recorded offences.
+
+
+HYPOTHESIS
+__________
+
+The new hypothesis of this analysis is therefore this: “When more people are losing their jobs, there is likely to be an increase in low-level ‘dishonesty’ offending or low-level violent offending in New Zealand.”
+
+The null hypothesis in this case is that there is no correlation between the two data sets.
+
+
+IMPORTING DATA
+______________
+
+To perform analysis of this assumption, I started by downloading historical data from Statistics New Zealand on the Household Labour Force Survey, specifically the supplementary tables, and data from New Zealand Police, via Statistics New Zealand regarding recorded offences.
+
+This time, rather than downloading the top level offence categories, I selected particular offences and offence categories which are relevant to the hypothesis.  In particular, this was data on thefts, burglaries, assaults, disorderly behaviour, fraud and deception related offences.
+
+The data relating to unemployment that I was interested in is responses to the question "Why did you leave your last job" - which I will refer to as job loss data for the remainder of this report.
+
+I did some tidying of the data in Microsoft Excel before importing as a CSV to R.
+
+
+LIBRARIES USED
+______________
+
+For this project I only used the tidyverse library, although from within that I believe I made use of some dplyr functions and some ggplot2 functions.
+
+
+```{r}
+library(tidyverse)
+
+raw_ue_df <- read.csv("labour-market-estimates-trimmed2.csv")
+
+raw_offence_df <- read.csv("Recorded offences data.csv")
+```
+
+
+DATA CLEANING
+_____________
+
+In order to carry out meaningful comparison of the data, I had to do some manipulation of the data tables.
+
+As in my previous study on these matters, the data on The crime data was recorded annually, whereas the job loss data was recorded quarterly. Additionally, it is worth noting that the job loss data related to people who have left their last job within the last 5 years. This data could be viewed in some way as a moving average across a longer period of time.
+
+However, for the purposes of comparison, I grouped the data points across a calendar year and averaged the figures in order to have an annual figure to compare against the annual crime statistics.
+
+Given that the stated assumption that I am attempting to investigate is that when people "lose" their jobs, they are more likely to commit crime, it seems reasonable to reject some of the reasons for leaving their last job.
+
+I would say that the categories of "Moved House / Spouse Transferred / Travel", "Family Responsibilities / Pregnancy", "Returned to Studies" and to some extent "Unsatisfactory Work Conditions" would fall more into a voluntary giving up of a job, rather than a "loss" of a job.
+
+"Laid Off / Dismissed / Made Redundant", "Temporary / Seasonal Job / End of Contract" and "Own Ill Health or Injury" would all to varying degrees fall more into the "loss" of a job rather than a voluntary relinquishing of it.
+
+I chose not to perform analysis on "Not Specified" or "Other", as their data would be difficult to draw any meaning from even if statistically significant results were obtained.
+
+
+
+
+```{r}
+lost_job_df <- filter(raw_ue_df, Group == "Unemployed by Reason for Leaving Last Job")
+
+lost_job_working <- lost_job_df%>%
+  pivot_wider(names_from = Category, values_from = Data_value)
+
+lost_job_working$Period <- paste0(lost_job_working$Period, ".01")
+
+lost_job_working$Period <- as.Date(lost_job_working$Period, "%Y.%m.%d")
+
+#calculate average on an annual basis
+lost_job_working <- lost_job_working %>%
+  mutate(Year = format(Period, "%Y")) %>%
+  group_by(Year) %>%
+  summarise(across(5:14, mean))
+
+
+colnames(lost_job_working) <- c("Year", "Family", "Let Go", "Location Change", "Contract Expired", "Not Specified", "Other", "Health", "Study", "Total Responses", "Work Conditions")
+
+lost_job_working <- lost_job_working %>%
+  mutate(across(where(is.numeric), ~ .x * 1000))
+
+lost_job_working$`Not Specified` <-lost_job_working$`Not Specified`+lost_job_working$Other
+
+lost_job_working <- subset(lost_job_working, select = -c(2,4,7,9,11))
+
+```
+
+
+In obtaining the offence data, I had four separate categories of Theft.  In order to have a manageable amount of comparison data, while still staying within the intentions of the analysis, I added the four categories of theft together and used the total in my analysis.
+
+
+```{r}
+
+offence_working <-  raw_offence_df%>%
+  pivot_wider(names_from = Offence, values_from = Value)
+
+theft <- offence_working$`Theft of a motor vehicle`+offence_working$`Theft from retail premises`+offence_working$`Theft (except motor vehicles), nec`+offence_working$`Theft from a person (excluding by force)`
+
+offence_working$Theft_Total <- theft
+
+remove(theft)
+
+offence_working <- subset(offence_working, select = -c(1, 2, 4, 5, 6, 7, 10, 11, 12, 14))
+
+colnames(offence_working) <- c("Year", "Assault", "Disorder", "Burglary", "Fraud", "Theft")
+```
+
+
+```{r}
+#define colour constants
+dismissedColour <- rgb(0, 0, 0, 1)
+temporaryColour <- rgb(0.5, 0, 0, 1)
+injuryColour <- rgb(0, 0.5, 0, 1)
+injColour <- rgb(0, 0, 0.5, 1)
+unspecifiedColour <- rgb(0.5, 0, 0.5, 1)
+totalResponsesColour <- rgb(0.5, 0.5, 0, 1)
+theftColour <- rgb(0.5, 1, 0, 1)
+fraudColour <- rgb(0.5, 0, 1, 1)
+burglaryColour <- rgb(0, 0.5, 1, 1)
+disorderColour <- rgb(0, 1, 0.5, 1)
+assaultColour <- rgb(1, 0, 1, 1)
+receivingColour <- rgb(0, 1, 1, 1)
+```
+
+
+OVERVIEW VISUALISATION
+______________________
+
+I created line graphs of each of the remaining categories of job loss data, and each of the remaining categories of offence data, against time, to get a broad overview of the trend lines.
+
+
+```{r Begin Plotting}
+#plot unemployment data
+plot_job1 <- ggplot(data = lost_job_working, mapping = aes(x = Year, y =`Let Go`, group = 1)) + geom_line(size = 2, colour = dismissedColour)
+plot_job1 + labs(title = "Reason for Leaving Last Job", subtitle = "Laid Off / Dismissed / Made Redundant", y = "Number of Responses")
+
+plot_job2 <- ggplot(data = lost_job_working, mapping = aes(x = Year, y =`Contract Expired`, group = 1)) + geom_line(size = 2, colour = temporaryColour)
+plot_job2 + labs(title =  "Reason for Leaving Last Job", subtitle = "Temporary / Seasonal Job / End of Contract", y = "Number of Responses")
+
+plot_job3 <- ggplot(data = lost_job_working, mapping = aes(x = Year, y =`Health`, group = 1)) + geom_line(size = 2, colour = injuryColour)
+plot_job3 + labs(title =  "Reason for Leaving Last Job", subtitle = "Own Ill Health or Injury")
+
+plot_job4 <- ggplot(data = lost_job_working, mapping = aes(x = Year, y =`Not Specified`, group = 1)) + geom_line(size = 2, colour = unspecifiedColour)
+plot_job4 + labs(title =  "Reason for Leaving Last Job", subtitle = "Not Specified / Other")
+
+plot_job5 <- ggplot(data = lost_job_working, mapping = aes(x = Year, y =`Total Responses`, group = 1)) + geom_line(size = 2, colour = totalResponsesColour)
+plot_job5 + labs(title =  "Reason for Leaving Last Job", subtitle = "Total - All Reasons")
+
+```
+
+
+```{r}
+plot_off1 <- ggplot(data = offence_working, mapping = aes(x = Year, y = Assault, group = 1)) + geom_line(size = 2, colour = assaultColour)
+plot_off1 + labs(title = "Number of Offences Recorded Nationally", subtitle = "Assault", y = "Number Recorded")
+
+
+plot_off2 <- ggplot(data = offence_working, mapping = aes(x = Year, y = Disorder, group = 1)) + geom_line(size = 2, colour = assaultColour)
+plot_off2 + labs(title = "Number of Offences Recorded Nationally", subtitle = "Disorderly Conduct", y = "Number Recorded")
+
+plot_off3 <- ggplot(data = offence_working, mapping = aes(x = Year, y = Burglary, group = 1)) + geom_line(size = 2, colour = burglaryColour)
+plot_off3 + labs(title = "Number of Offences Recorded Nationally", subtitle = "Unlawful entry with intent/burglary, break and enter", y = "Number Recorded")
+
+plot_off4 <- ggplot(data = offence_working, mapping = aes(x = Year, y =Fraud, group = 1)) + geom_line(size = 2, colour = fraudColour)
+plot_off4 + labs(title = "Number of Offences Recorded Nationally", subtitle = "Fraud, deception and related offences", y = "Number Recorded")
+
+plot_off5 <- ggplot(data = offence_working, mapping = aes(x = Year, y = Theft, group = 1)) + geom_line(size = 2, colour = theftColour)
+plot_off5 + labs(title = "Number of Offences Recorded Nationally", subtitle = "Theft (All Categories Combined)", y = "Number Recorded")
+
+```
+
+As seen in the graphs above, some of the general trend lines appear to be quite similar across the two categories of data being analysed, so I was hopeful that there might be some useful correlation evident in the tests.
+
+
+ALGORITHMS/TESTS USED
+_____________________
+
+I utilised the Kendall rank-correlation test again, as it is said to be more accurate for small sample sizes, and as I only have 20 years of data to compare.
+
+I conducted the tests in batches, of each category of job loss data paired off against each category of offence data.
+
+
+```{r}
+tests_laidoff <- data.frame(data.frame(matrix(NA, nrow = 8, ncol = 1)))
+
+tests_laidoff$Assault <- cor.test(lost_job_working$`Let Go`, offence_working$Assault, method = ("kendall"))
+
+tests_laidoff$Disorder <- cor.test(lost_job_working$`Let Go`, offence_working$Disorder, method = ("kendall"))
+
+tests_laidoff$Burglary <- cor.test(lost_job_working$`Let Go`, offence_working$Burglary, method = ("kendall"))
+
+tests_laidoff$Fraud <- cor.test(lost_job_working$`Let Go`, offence_working$Fraud, method = ("kendall"))
+
+tests_laidoff$Theft <- cor.test(lost_job_working$`Let Go`, offence_working$Theft, method = ("kendall"))
+
+tests_laidoff <- subset(tests_laidoff, select = -c(1))
+
+tests_laidoff
+
+```
+
+```{r}
+tests_health <- data.frame(data.frame(matrix(NA, nrow = 8, ncol = 1)))
+
+tests_health$Assault <- cor.test(lost_job_working$`Health`, offence_working$Assault, method = ("kendall"))
+
+tests_health$Disorder <- cor.test(lost_job_working$`Health`, offence_working$Disorder, method = ("kendall"))
+
+tests_health$Burglary <- cor.test(lost_job_working$`Health`, offence_working$Burglary, method = ("kendall"))
+
+tests_health$Fraud <- cor.test(lost_job_working$`Health`, offence_working$Fraud, method = ("kendall"))
+
+tests_health$Theft <- cor.test(lost_job_working$`Health`, offence_working$Theft, method = ("kendall"))
+
+tests_health <- subset(tests_health, select = -c(1))
+
+tests_health
+
+```
+
+
+```{r}
+tests_other <- data.frame(data.frame(matrix(NA, nrow = 8, ncol = 1)))
+
+tests_other$Assault <- cor.test(lost_job_working$`Not Specified`, offence_working$Assault, method = ("kendall"))
+
+tests_other$Disorder <- cor.test(lost_job_working$`Not Specified`, offence_working$Disorder, method = ("kendall"))
+
+tests_other$Burglary <- cor.test(lost_job_working$`Not Specified`, offence_working$Burglary, method = ("kendall"))
+
+tests_other$Fraud <- cor.test(lost_job_working$`Not Specified`, offence_working$Fraud, method = ("kendall"))
+
+tests_other$Theft <- cor.test(lost_job_working$`Not Specified`, offence_working$Theft, method = ("kendall"))
+
+tests_other <- subset(tests_other, select = -c(1))
+
+tests_other
+```
+
+
+```{r}
+tests_total <- data.frame(data.frame(matrix(NA, nrow = 8, ncol = 1)))
+
+tests_total$Assault <- cor.test(lost_job_working$`Total Responses`, offence_working$Assault, method = ("kendall"))
+
+tests_total$Disorder <- cor.test(lost_job_working$`Total Responses`, offence_working$Disorder, method = ("kendall"))
+
+tests_total$Burglary <- cor.test(lost_job_working$`Total Responses`, offence_working$Burglary, method = ("kendall"))
+
+tests_total$Fraud <- cor.test(lost_job_working$`Total Responses`, offence_working$Fraud, method = ("kendall"))
+
+tests_total$Theft <- cor.test(lost_job_working$`Total Responses`, offence_working$Theft, method = ("kendall"))
+
+tests_total <- subset(tests_total, select = -c(1))
+
+tests_total
+```
+
+
+```{r}
+tests_expired <- data.frame(data.frame(matrix(NA, nrow = 8, ncol = 1)))
+
+tests_expired$Assault <- cor.test(lost_job_working$`Contract Expired`, offence_working$Assault, method = ("kendall"))
+
+tests_expired$Disorder <- cor.test(lost_job_working$`Contract Expired`, offence_working$Disorder, method = ("kendall"))
+
+tests_expired$Burglary <- cor.test(lost_job_working$`Contract Expired`, offence_working$Burglary, method = ("kendall"))
+
+tests_expired$Fraud <- cor.test(lost_job_working$`Contract Expired`, offence_working$Fraud, method = ("kendall"))
+
+tests_expired$Theft <- cor.test(lost_job_working$`Contract Expired`, offence_working$Theft, method = ("kendall"))
+
+tests_expired <- subset(tests_expired, select = -c(1))
+
+tests_expired
+```
+
+FINDINGS
+________
+
+I was somewhat surprised to find that of the 20 data pairs being analysed, only 5 of them showed a statistically significant result.
+
+The "Contract Expired" category of job loss had three significant pairs:
+Assault, with a P-value of 0.0086 and a Tau value of 0.4153
+and Theft, with a P-value of 0.0235 and a Tau value of -0.3580.
+
+The "Disorder" category of offences only had three significant pairs:
+Own Health/Injury, P-value 0.0004 and Tau -0.5429
+Laid Off/Dismissed/Made Redundant, P-value 0.0170, Tau -0.3771, and
+Total Responses, P-value 0.0157, Tau -0.3810.
+
+It's probably fair to discount "Total Responses" at this point of the analysis, as that includes all the people who have left their jobs voluntarily and not being considered otherwise in this study, so that leaves only two pairs.
+
+The only positive correlation among the four remaining pairs, which would support the assumption under investigation, is between assault and temporary workers whose contract came to an end.
+
+The other three pairs of data seem to show that when recorded offences are increasing, less people are responding to questions about why they left their last job, which could be extrapolated to indicate the number of people losing their jobs is decreasing when those crimes are increasing.
+
+
+PERSONAL OPINION
+________________
+
+From the analysis conducted, there seems to be more evidence that the hypothesis is wrong than there is to support the hypothesis.
+
+
+REFLECTION / FUTURE
+___________________
+
+I found the result of this analysis somewhat surprising at first, however I came to realise that in reality it probably says something about the mindset of the person who held an assumption that people turn to crime when they lose their jobs.
+
+It would be interesting to see if there is some way to investigate the existence of a correlation between the length of service of a Police Officer in New Zealand, and their attitude towards and expecteation of the behaviour expected of the general public.  It seems reasonable to think that the more time they spend dealing with the people who commit offences, the more they may come to equate that behaviour with "normal" behaviour.
